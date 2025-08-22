@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Auth;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Exports\PagosExport;
 use Barryvdh\DomPDF\Facade\Pdf; 
+use Illuminate\Support\Facades\Log;
 
 
 
@@ -22,7 +23,7 @@ class AdminController extends Controller
     /**
      * Panel principal de administración:
      * Muestra los movimientos de todos los empleados de los últimos 7 días.
-     */// Puedes poner esto arriba de tu método dashboard o dentro, como prefieras.
+     */// 
 private function esMovimientoVacio($mov) {
     if (!$mov) return true;
     return
@@ -35,20 +36,34 @@ private function esMovimientoVacio($mov) {
         ($mov->egreso ?? 0) == 0;
 }
 
-public function dashboard()
+public function dashboard(Request $request)
 {
-    // Definir rango de la semana (últimos 7 días)
-    $hace7 = \Carbon\Carbon::now()->subDays(6)->startOfDay();
-    $hoy   = \Carbon\Carbon::now()->endOfDay();
+    $tienda_id = session('tienda_id', 1);
 
-    // Traer movimientos de la semana (de todos los usuarios)
-    $movimientosSemana = \App\Models\Movimiento::whereBetween('created_at', [$hace7, $hoy])
-        ->orderBy('created_at')
-        ->with('usuario')
-        ->get()
-        ->values();
+    // Determina el periodo de corte (semana, mes, año, todos, etc.)
+    $corte = $request->input('periodo', 'semana'); // por default 'semana'
 
-    // Agrupar en filas (ingreso/egreso) por batch
+    if ($request->filled('fecha')) {
+        // Filtrar solo por fecha exacta (sin importar hora)
+        $movimientosSemana = \App\Models\Movimiento::where('tienda_id', $tienda_id)
+            ->whereDate('created_at', $request->fecha)
+            ->orderBy('created_at')
+            ->with('usuario')
+            ->get()
+            ->values();
+    } else {
+        // Últimos 7 días (desde hace 6 días hasta hoy)
+        $hace7 = \Carbon\Carbon::now()->subDays(6)->startOfDay();
+        $hoy   = \Carbon\Carbon::now()->endOfDay();
+
+        $movimientosSemana = \App\Models\Movimiento::where('tienda_id', $tienda_id)
+            ->whereBetween('created_at', [$hace7, $hoy])
+            ->orderBy('created_at')
+            ->with('usuario')
+            ->get()
+            ->values();
+    }
+
     $filas = [];
     $i     = 0;
     $n     = $movimientosSemana->count();
@@ -58,9 +73,7 @@ public function dashboard()
         $fila = ['ingreso' => null, 'egreso' => null];
 
         if ($curr->egreso == 0) {
-            // Es ingreso
             $fila['ingreso'] = $curr;
-            // Si el siguiente es egreso del mismo batch, lo emparejamos
             if (
                 $i + 1 < $n &&
                 $movimientosSemana[$i + 1]->egreso > 0 &&
@@ -69,11 +82,9 @@ public function dashboard()
                 $fila['egreso'] = $movimientosSemana[++$i];
             }
         } else {
-            // Es egreso suelto
             $fila['egreso'] = $curr;
         }
 
-        // Solo agrega si alguno tiene datos REALES
         if (!$this->esMovimientoVacio($fila['ingreso']) || !$this->esMovimientoVacio($fila['egreso'])) {
             $filas[] = $fila;
         }
@@ -81,7 +92,6 @@ public function dashboard()
         $i++;
     }
 
-    // CALCULO DE TOTALES DE INGRESOS
     $ingresos = $movimientosSemana->where('egreso', 0);
     $totalOtros         = $ingresos->sum('otros');
     $totalEfectivo      = $ingresos->sum('efectivo');
@@ -91,175 +101,206 @@ public function dashboard()
     $totalTransferencia = $ingresos->sum('venta_transferencia');
     $totalIngresos      = $totalOtros + $totalEfectivo + $totalTarjeta + $totalVales + $totalPagos + $totalTransferencia;
 
-    // CALCULO DE TOTALES DE EGRESOS
     $egresos = $movimientosSemana->where('egreso', '>', 0);
     $totalEgresos              = $egresos->sum('egreso');
     $totalEgresoEfectivo       = $egresos->where('egreso_tipo', 'Efectivo')->sum('egreso');
     $totalEgresoTransferencia  = $egresos->where('egreso_tipo', 'Transferencia')->sum('egreso');
     $totalEgresoCredito        = $egresos->where('egreso_tipo', 'Crédito')->sum('egreso');
+    $totalEgresoTarjeta       = $egresos->where('egreso_tipo', 'Tarjeta')->sum('egreso');
 
-    return view('admin.dashboard', compact(
-        'filas',
-        'totalIngresos', 'totalOtros', 'totalEfectivo', 'totalTarjeta', 'totalVales', 'totalPagos', 'totalTransferencia',
-        'totalEgresos', 'totalEgresoEfectivo', 'totalEgresoTransferencia', 'totalEgresoCredito'
-    ));
+    // Devuelve la vista con la variable $corte
+return view('admin.dashboard', compact(
+    'filas',
+    'totalIngresos',
+    'totalOtros',
+    'totalEfectivo',
+    'totalTarjeta',
+    'totalVales',
+    'totalPagos',
+    'totalTransferencia',
+    'totalEgresos',
+    'totalEgresoEfectivo',
+    'totalEgresoTransferencia',
+    'totalEgresoCredito',
+    'totalEgresoTarjeta',   // <<< y agrégalo aquí
+    'corte'
+));
+} 
+
+
+
+
+public function listaEmpleados()
+{
+    $tienda_id = session('tienda_id', 1); // Usa la tienda activa
+    $empleados = Usuario::where('rol', 'empleado')
+                        ->where('tienda_id', $tienda_id)
+                        ->get();
+    return view('admin.empleados.index', compact('empleados'));
 }
 
 
 
-    public function listaEmpleados()
-    {
-        $empleados = Usuario::where('rol', 'empleado')->get();
-        return view('admin.empleados.index', compact('empleados'));
-    }
 
-    public function guardarCierre(Request $request)
-    {
-        $datos = $request->validate([
-            'venta_efectivo'      => 'nullable|numeric|min:0',
-            'venta_tarjeta'       => 'nullable|numeric|min:0',
-            'venta_caldes'        => 'nullable|numeric|min:0',
-            'pagos_clientes'      => 'nullable|numeric|min:0',
-            'venta_transferencia' => 'nullable|numeric|min:0',
-            'concepto_tipo'       => 'nullable|string',
-            'otros_descripcion'   => 'nullable|string',
-            'otros_monto'         => 'nullable|numeric|min:0',
-            'egreso_tipo'         => 'nullable|string',
-            'egreso_monto'        => 'nullable|numeric|min:0',
-            'egreso_descripcion'  => 'nullable|string',
-            'egreso_nota'         => 'nullable|string',
-            'credito_origen'      => 'nullable|string',
-            'credito_otro_banco'  => 'nullable|string',
-            'banco_personalizado' => 'nullable|string',
-            'proveedor_nombre'    => 'nullable|string',
-            'egreso_vencimiento'  => 'nullable|date',
-        ]);
 
-        // Creamos un UUID para batch
-        $batch = Str::uuid()->toString();
+   public function guardarCierre(Request $request)
+{
+    $datos = $request->validate([
+        'venta_efectivo'      => 'nullable|numeric|min:0',
+        'venta_tarjeta'       => 'nullable|numeric|min:0',
+        'venta_caldes'        => 'nullable|numeric|min:0',
+        'pagos_clientes'      => 'nullable|numeric|min:0',
+        'venta_transferencia' => 'nullable|numeric|min:0',
+        'concepto_tipo'       => 'nullable|string',
+        'otros_descripcion'   => 'nullable|string',
+        'otros_monto'         => 'nullable|numeric|min:0',
+        'egreso_tipo'         => 'nullable|string',
+        'egreso_monto'        => 'nullable|numeric|min:0',
+        'egreso_descripcion'  => 'nullable|string',
+        'egreso_nota'         => 'nullable|string',
+        'credito_origen'      => 'nullable|string',
+        'credito_otro_banco'  => 'nullable|string',
+        'banco_personalizado' => 'nullable|string',
+        'proveedor_nombre'    => 'nullable|string',
+        'egreso_vencimiento'  => 'nullable|date',
+    ]);
 
-        DB::transaction(function() use ($datos, $batch) {
-            // INGRESO
-            if (
-                ($datos['concepto_tipo'] ?? '') === 'otros'
-                && ($datos['otros_monto'] ?? 0) > 0
-            ) {
-                // Ingreso “Otros”
-                Movimiento::create([
-                    'batch'               => $batch,
-                     'usuario_id' => Auth::id(),
-                    'concepto'            => $datos['otros_descripcion'] ?? 'Otros',
-                    'efectivo'            => 0,
-                    'tarjeta'             => 0,
-                    'caldes'              => 0,
-                    'pagos_clientes'      => 0,
-                    'venta_transferencia' => 0,
-                    'otros'               => $datos['otros_monto'],
-                    'otros_descripcion'   => $datos['otros_descripcion'],
-                    'egreso'              => 0,
-                ]);
-            } else {
-                // Ingreso normal (con comisión de transferencia)
-                $vt = $datos['venta_transferencia'] ?? 0;
-if ($vt > 0) {
-    $comision = round($vt * 0.0036, 2); // Calcula comisión al 0.36%
-    $vt = max(0, $vt - $comision);      // Resta la comisión al bruto
+    // Creamos un UUID para batch
+    $batch = Str::uuid()->toString();
+
+    DB::transaction(function() use ($datos, $batch) {
+        $tienda_id = session('tienda_id', 1); // <-- AQUÍ tomamos la tienda activa
+
+        // INGRESO “Otros”
+        if (
+            ($datos['concepto_tipo'] ?? '') === 'otros'
+            && ($datos['otros_monto'] ?? 0) > 0
+        ) {
+            Movimiento::create([
+                'batch'               => $batch,
+                'usuario_id'          => Auth::id(),
+                'concepto'            => $datos['otros_descripcion'] ?? 'Otros',
+                'efectivo'            => 0,
+                'tarjeta'             => 0,
+                'caldes'              => 0,
+                'pagos_clientes'      => 0,
+                'venta_transferencia' => 0,
+                'otros'               => $datos['otros_monto'],
+                'otros_descripcion'   => $datos['otros_descripcion'],
+                'egreso'              => 0,
+                'tienda_id'           => $tienda_id, // <-- AGREGADO
+            ]);
+        } else {
+            // Ingreso normal (con comisión de transferencia)
+// Ingreso normal (con comisión de tarjeta)
+$tarjeta = $datos['venta_tarjeta'] ?? 0;
+if ($tarjeta > 0) {
+    $comision = round($tarjeta * 0.0036, 2); // Calcula comisión al 0.36%
+    $tarjeta = max(0, $tarjeta - $comision); // Resta la comisión al bruto
 }
 
-                Movimiento::create([
-                    'batch'               => $batch,
-                    'usuario_id' => Auth::id(),
-                    'concepto'            => $datos['concepto_tipo'] ?? '',
-                    'efectivo'            => $datos['venta_efectivo'] ?? 0,
-                    'tarjeta'             => $datos['venta_tarjeta']  ?? 0,
-                    'caldes'              => $datos['venta_caldes']   ?? 0,
-                    'pagos_clientes'      => $datos['pagos_clientes'] ?? 0,
-                    'venta_transferencia' => $vt,
-                    'otros'               => 0,
-                    'otros_descripcion'   => null,
-                    'egreso'              => 0,
-                ]);
+Movimiento::create([
+    'batch'               => $batch,
+    'usuario_id'          => Auth::id(),
+    'concepto'            => $datos['concepto_tipo'] ?? '',
+    'efectivo'            => $datos['venta_efectivo'] ?? 0,
+    'tarjeta'             => $tarjeta, // <-- Ya con comisión descontada
+    'caldes'              => $datos['venta_caldes']   ?? 0,
+    'pagos_clientes'      => $datos['pagos_clientes'] ?? 0,
+    'venta_transferencia' => $datos['venta_transferencia'] ?? 0, // <-- Sin comisión
+    'otros'               => 0,
+    'otros_descripcion'   => null,
+    'egreso'              => 0,
+    'tienda_id'           => $tienda_id,
+]);
+
+        }
+
+        // EGRESO
+        if (
+            ($datos['egreso_monto'] ?? 0) > 0
+            && ! empty($datos['egreso_tipo'])
+        ) {
+            // Armamos el texto de concepto de egreso
+            $conceptoE = 'Cierre diario (Egreso) ' . $datos['egreso_tipo'];
+
+            if ($datos['egreso_tipo'] === 'Transferencia') {
+                $dest   = $datos['banco_personalizado'] 
+                            ?? $datos['proveedor_nombre'] 
+                            ?? '';
+                $conceptoE .= " → {$dest}";
             }
 
-            // EGRESO
-            if (
-                ($datos['egreso_monto'] ?? 0) > 0
-                && ! empty($datos['egreso_tipo'])
-            ) {
-                // Armamos el texto de concepto de egreso
-                $conceptoE = 'Cierre diario (Egreso) ' . $datos['egreso_tipo'];
-
-                if ($datos['egreso_tipo'] === 'Transferencia') {
-                    $dest   = $datos['banco_personalizado'] 
-                                ?? $datos['proveedor_nombre'] 
-                                ?? '';
-                    $conceptoE .= " → {$dest}";
-                }
-
-                if ($datos['egreso_tipo'] === 'Crédito') {
-                    $ori    = $datos['credito_origen'] ?? '';
-                    $suffix = $ori === 'Otros'
-                        ? ' (' . ($datos['credito_otro_banco'] ?? '') . ')'
-                        : '';
-                    $vto    = $datos['egreso_vencimiento'] ?? '';
-                    $conceptoE .= " → {$ori}{$suffix} (venc: {$vto})";
-                }
-
-                if (! empty($datos['egreso_descripcion'])) {
-                    $conceptoE .= ': ' . $datos['egreso_descripcion'];
-                }
-
-                Movimiento::create([
-                    'batch'               => $batch,
-                    'usuario_id' => Auth::id(),
-                    'concepto'            => $conceptoE,
-                    'efectivo'            => 0,
-                    'tarjeta'             => 0,
-                    'caldes'              => 0,
-                    'pagos_clientes'      => 0,
-                    'venta_transferencia' => 0,
-                    'otros'               => 0,
-                    'otros_descripcion'   => null,
-                    'egreso'              => $datos['egreso_monto'],
-                    'egreso_tipo'         => $datos['egreso_tipo'],
-                    'egreso_descripcion'  => $datos['egreso_descripcion'] ?? null,
-                    'egreso_nota'         => $datos['egreso_nota']        ?? null,
-                    'credito_origen'      => $datos['credito_origen']     ?? null,
-                    'credito_otro_banco'  => $datos['credito_otro_banco'] ?? null,
-                    'banco_personalizado' => $datos['banco_personalizado']?? null,
-                    'proveedor_nombre'    => $datos['proveedor_nombre']   ?? null,
-                    'egreso_vencimiento'  => $datos['egreso_vencimiento'] ?? null,
-                ]);
+            if ($datos['egreso_tipo'] === 'Crédito') {
+                $ori    = $datos['credito_origen'] ?? '';
+                $suffix = $ori === 'Otros'
+                    ? ' (' . ($datos['credito_otro_banco'] ?? '') . ')'
+                    : '';
+                $vto    = $datos['egreso_vencimiento'] ?? '';
+                $conceptoE .= " → {$ori}{$suffix} (venc: {$vto})";
             }
-        });
 
-        return redirect()->route('admin.dashboard')
-                         ->with('success', 'Cierre registrado correctamente');
-    }
+            if (! empty($datos['egreso_descripcion'])) {
+                $conceptoE .= ': ' . $datos['egreso_descripcion'];
+            }
+
+            Movimiento::create([
+                'batch'               => $batch,
+                'usuario_id'          => Auth::id(),
+                'concepto'            => $conceptoE,
+                'efectivo'            => 0,
+                'tarjeta'             => 0,
+                'caldes'              => 0,
+                'pagos_clientes'      => 0,
+                'venta_transferencia' => 0,
+                'otros'               => 0,
+                'otros_descripcion'   => null,
+                'egreso'              => $datos['egreso_monto'],
+                'egreso_tipo'         => $datos['egreso_tipo'],
+                'egreso_descripcion'  => $datos['egreso_descripcion'] ?? null,
+                'egreso_nota'         => $datos['egreso_nota']        ?? null,
+                'credito_origen'      => $datos['credito_origen']     ?? null,
+                'credito_otro_banco'  => $datos['credito_otro_banco'] ?? null,
+                'banco_personalizado' => $datos['banco_personalizado']?? null,
+                'proveedor_nombre'    => $datos['proveedor_nombre']   ?? null,
+                'egreso_vencimiento'  => $datos['egreso_vencimiento'] ?? null,
+                'tienda_id'           => $tienda_id, // <-- AGREGADO
+            ]);
+        }
+    });
+
+    return redirect()->route('admin.dashboard')
+                     ->with('success', 'Cierre registrado correctamente');
+}
+
 
     public function formCrearEmpleado()
     {
         return view('admin.empleados.crear');
     }
 
-    public function crearEmpleado(Request $request)
-    {
-        $datos = $request->validate([
-            'name'     => 'required|string|max:255',
-            'email'    => 'required|email|unique:users,email',
-            'password' => 'required|string|min:8|confirmed',
-        ]);
+public function crearEmpleado(Request $request)
+{
+    $datos = $request->validate([
+        'name'      => 'required|string|max:255',
+        'email'     => 'required|email|unique:users,email',
+        'password'  => 'required|string|min:8|confirmed',
+        // Quita tienda_id de aquí
+    ]);
 
-        Usuario::create([
-            'name'     => $datos['name'],
-            'email'    => $datos['email'],
-            'password' => Hash::make($datos['password']),
-            'rol'      => 'empleado',
-        ]);
+    Usuario::create([
+        'name'      => $datos['name'],
+        'email'     => $datos['email'],
+        'password'  => \Hash::make($datos['password']),
+        'rol'       => 'empleado',
+        'tienda_id' => session('tienda_id', 1), // <-- aquí siempre la actual
+    ]);
 
-        return redirect()->route('admin.empleados')
-                         ->with('success', 'Empleado creado con éxito.');
-    }
+    return redirect()->route('admin.empleados')
+                    ->with('success', 'Empleado creado con éxito.');
+}
+
+
 
     public function verEmpleado(Usuario $empleado)
     {
@@ -457,33 +498,45 @@ public function actualizarEgreso(Request $request, $id)
 public function estadisticas(Request $request)
 {
     $periodo = $request->input('periodo', 'semana');
-    $hoy = Carbon::now();
+    $hoy = \Carbon\Carbon::now();
 
     // === Selección de rango de fechas según el periodo ===
-    if ($periodo === 'mes') {
-        $inicioSem = $hoy->copy()->startOfMonth();
-        $finSem    = $hoy->copy()->endOfMonth();
-    } elseif ($periodo === 'año') {
-        $inicioSem = $hoy->copy()->startOfYear();
-        $finSem    = $hoy->copy()->endOfYear();
-    } else { // Semana por defecto
-        $inicioSem = $hoy->copy()->startOfWeek(Carbon::MONDAY);
-        $finSem    = $hoy->copy()->endOfWeek(Carbon::SUNDAY);
-    }
+if ($periodo === 'mes') {
+    $inicioSem = $hoy->copy()->startOfMonth();
+    $finSem    = $hoy->copy()->endOfMonth();
+} elseif ($periodo === 'año') {
+    $inicioSem = $hoy->copy()->startOfYear();
+    $finSem    = $hoy->copy()->endOfYear();
+} else { // Semana por defecto: ÚLTIMOS 7 DÍAS (igual que dashboard)
+    $inicioSem = $hoy->copy()->subDays(6)->startOfDay();
+    $finSem    = $hoy->copy()->endOfDay();
+}
 
-    // === Traer todos los movimientos del periodo seleccionado ===
-    $movimientosSemana = Movimiento::whereBetween('created_at', [$inicioSem, $finSem])->get();
 
-    // === Suma de INGRESOS del periodo ===
-    $ingresosSemana = $movimientosSemana->where('egreso', 0)->sum(function($m) {
-        return
-            ($m->efectivo ?? 0)
-          + ($m->tarjeta ?? 0)
-          + ($m->caldes ?? 0)
-          + ($m->pagos_clientes ?? 0)
-          + ($m->venta_transferencia ?? 0)
-          + ($m->otros ?? 0);
-    });
+    // === Traer todos los movimientos del periodo seleccionado, filtrando por tienda ===
+    $movimientosSemana = \App\Models\Movimiento::where('tienda_id', session('tienda_id', 1))
+        ->whereBetween('created_at', [$inicioSem, $finSem])
+        ->get();
+
+    // === Suma de INGRESOS del periodo completo ===
+    $ingresosSemana = $movimientosSemana
+        ->where('egreso', 0)
+        ->sum(function($m) {
+            return
+                ($m->efectivo ?? 0)
+              + ($m->tarjeta ?? 0)
+              + ($m->caldes ?? 0)
+              + ($m->pagos_clientes ?? 0)
+              + ($m->venta_transferencia ?? 0)
+              + ($m->otros ?? 0);
+        });
+
+    // === Desglose de ingresos por método ===
+    $ingresosEfectivo      = $movimientosSemana->where('egreso', 0)->sum('efectivo');
+    $ingresosTarjeta       = $movimientosSemana->where('egreso', 0)->sum('tarjeta');
+    $ingresosVales         = $movimientosSemana->where('egreso', 0)->sum('caldes');
+    $ingresosPagosClientes = $movimientosSemana->where('egreso', 0)->sum('pagos_clientes');
+    $ingresosTransferencia = $movimientosSemana->where('egreso', 0)->sum('venta_transferencia');
 
     // === Suma de EGRESOS del periodo ===
     $egresosSemana = $movimientosSemana->where('egreso', '>', 0)->sum('egreso');
@@ -498,101 +551,95 @@ public function estadisticas(Request $request)
                 ($mov->pagos_clientes ?? 0) != 0 ||
                 ($mov->venta_transferencia ?? 0) != 0 ||
                 ($mov->otros ?? 0) != 0 ||
-                ($mov->egreso ?? 0) != 0;
+                ($mov->egreso  ?? 0) != 0;
         })
         ->sortBy('created_at');
 
     // === PREPARAR DATOS PARA LAS GRÁFICAS (ajustar rango según periodo) ===
-    $labels = [];
+    $labels        = [];
     $ingresosPorDia = [];
     $egresosPorDia  = [];
 
     if ($periodo === 'semana') {
-        // 7 días
         for ($dia = 0; $dia < 7; $dia++) {
             $fecha = $inicioSem->copy()->addDays($dia);
-            $label = $fecha->format('D d/m');
-            $labels[] = $label;
+            $labels[] = $fecha->format('D d/m');
 
             $ingresosPorDia[] = $movimientosSemana
                 ->where('egreso', 0)
                 ->whereBetween('created_at', [
                     $fecha->copy()->startOfDay(),
-                    $fecha->copy()->endOfDay()
+                    $fecha->copy()->endOfDay(),
                 ])->sum(function($m) {
                     return
                         ($m->efectivo ?? 0)
-                        + ($m->tarjeta ?? 0)
-                        + ($m->caldes ?? 0)
-                        + ($m->pagos_clientes ?? 0)
-                        + ($m->venta_transferencia ?? 0)
-                        + ($m->otros ?? 0);
+                      + ($m->tarjeta ?? 0)
+                      + ($m->caldes ?? 0)
+                      + ($m->pagos_clientes ?? 0)
+                      + ($m->venta_transferencia ?? 0)
+                      + ($m->otros ?? 0);
                 });
 
             $egresosPorDia[] = $movimientosSemana
                 ->where('egreso', '>', 0)
                 ->whereBetween('created_at', [
                     $fecha->copy()->startOfDay(),
-                    $fecha->copy()->endOfDay()
+                    $fecha->copy()->endOfDay(),
                 ])->sum('egreso');
         }
     } elseif ($periodo === 'mes') {
-        // Días del mes
         $diasEnMes = $inicioSem->daysInMonth;
         for ($dia = 1; $dia <= $diasEnMes; $dia++) {
             $fecha = $inicioSem->copy()->day($dia);
-            $label = $fecha->format('d/m');
-            $labels[] = $label;
+            $labels[] = $fecha->format('d/m');
 
             $ingresosPorDia[] = $movimientosSemana
                 ->where('egreso', 0)
                 ->whereBetween('created_at', [
                     $fecha->copy()->startOfDay(),
-                    $fecha->copy()->endOfDay()
+                    $fecha->copy()->endOfDay(),
                 ])->sum(function($m) {
                     return
                         ($m->efectivo ?? 0)
-                        + ($m->tarjeta ?? 0)
-                        + ($m->caldes ?? 0)
-                        + ($m->pagos_clientes ?? 0)
-                        + ($m->venta_transferencia ?? 0)
-                        + ($m->otros ?? 0);
+                      + ($m->tarjeta ?? 0)
+                      + ($m->caldes ?? 0)
+                      + ($m->pagos_clientes ?? 0)
+                      + ($m->venta_transferencia ?? 0)
+                      + ($m->otros ?? 0);
                 });
 
             $egresosPorDia[] = $movimientosSemana
                 ->where('egreso', '>', 0)
                 ->whereBetween('created_at', [
                     $fecha->copy()->startOfDay(),
-                    $fecha->copy()->endOfDay()
+                    $fecha->copy()->endOfDay(),
                 ])->sum('egreso');
         }
-    } elseif ($periodo === 'año') {
-        // Meses del año
+    } else { // año
         for ($mes = 1; $mes <= 12; $mes++) {
             $fecha = $inicioSem->copy()->month($mes)->startOfMonth();
-            $label = $fecha->format('M Y');
-            $labels[] = $label;
+            $labels[] = $fecha->format('M Y');
 
             $ingresosPorDia[] = $movimientosSemana
                 ->where('egreso', 0)
                 ->whereBetween('created_at', [
                     $fecha->copy()->startOfMonth(),
-                    $fecha->copy()->endOfMonth()
+                    $fecha->copy()->endOfMonth(),
                 ])->sum(function($m) {
                     return
                         ($m->efectivo ?? 0)
-                        + ($m->tarjeta ?? 0)
-                        + ($m->caldes ?? 0)
-                        + ($m->pagos_clientes ?? 0)
-                        + ($m->venta_transferencia ?? 0)
-                        + ($m->otros ?? 0);
+                      + ($m->tarjeta ?? 0)
+                      + ($m->caldes ?? 0)
+                      + ($m->pagos_clientes ?? 0)
+                      + ($m->venta_transferencia ?? 0)
+                      + ($m->otros ?? 0);
                 });
 
             $egresosPorDia[] = $movimientosSemana
                 ->where('egreso', '>', 0)
                 ->whereBetween('created_at', [
                     $fecha->copy()->startOfMonth(),
-                    $fecha->copy()->endOfMonth()
+                    $fecha->copy()->endOfMonth(),
                 ])->sum('egreso');
         }
     }
@@ -603,23 +650,29 @@ public function estadisticas(Request $request)
     $jsonEgresos  = json_encode($egresosPorDia);
 
     return view('admin.estadisticas.estadisticas', [
-        'inicioSem'      => $inicioSem,
-        'finSem'         => $finSem,
-        'ingresosSemana' => $ingresosSemana,
-        'egresosSemana'  => $egresosSemana,
-        'detalleSemana'  => $detalleSemana,
-        'jsonLabels'     => $jsonLabels,
-        'jsonIngresos'   => $jsonIngresos,
-        'jsonEgresos'    => $jsonEgresos,
-        'periodo'        => $periodo
+        'inicioSem'            => $inicioSem,
+        'finSem'               => $finSem,
+        'ingresosSemana'       => $ingresosSemana,
+        'egresosSemana'        => $egresosSemana,
+        'detalleSemana'        => $detalleSemana,
+        'jsonLabels'           => $jsonLabels,
+        'jsonIngresos'         => $jsonIngresos,
+        'jsonEgresos'          => $jsonEgresos,
+        'periodo'              => $periodo,
+        // Pasa el desglose a la vista:
+        'ingresosEfectivo'      => $ingresosEfectivo,
+        'ingresosTarjeta'       => $ingresosTarjeta,
+        'ingresosVales'         => $ingresosVales,
+        'ingresosPagosClientes' => $ingresosPagosClientes,
+        'ingresosTransferencia' => $ingresosTransferencia,
     ]);
 }
 
-
-
 public function pagos(Request $request)
 {
-    $query = Pago::with('empleado');
+    // Filtro por tienda
+    $query = Pago::with('empleado')
+        ->where('tienda_id', session('tienda_id', 1));
 
     // Filtros de búsqueda
     if ($request->filled('buscar')) {
@@ -643,6 +696,7 @@ public function pagos(Request $request)
     return view('admin.pagos.index', compact('pagos', 'empleados'));
 }
 
+
 public function guardarPago(Request $request)
 {
     $request->validate([
@@ -654,15 +708,20 @@ public function guardarPago(Request $request)
         'descripcion' => 'nullable|string|max:1000',
     ]);
 
-    Pago::create($request->all());
+    $data = $request->all();
+    $data['tienda_id'] = session('tienda_id', 1); // Aquí asignas la tienda activa
+
+    Pago::create($data);
 
     return redirect()->route('admin.pagos')->with('success', 'Pago registrado correctamente.');
 }
 
+
 // Exportar a Excel
 public function pagosExcel(Request $request)
 {
-    $pagos = Pago::with('empleado');
+    $pagos = Pago::with('empleado')
+        ->where('tienda_id', session('tienda_id', 1)); // <--- FILTRO POR TIENDA
 
     if ($request->filled('buscar')) {
         $buscar = $request->buscar;
@@ -682,10 +741,12 @@ public function pagosExcel(Request $request)
     return Excel::download(new PagosExport($result), 'pagos_empleados.xlsx');
 }
 
+
 // Exportar a PDF
 public function pagosPdf(Request $request)
 {
-    $pagos = Pago::with('empleado');
+    $pagos = Pago::with('empleado')
+        ->where('tienda_id', session('tienda_id', 1)); // <--- AGREGADO
 
     if ($request->filled('buscar')) {
         $buscar = $request->buscar;
@@ -707,9 +768,12 @@ public function pagosPdf(Request $request)
 }
 
 
+
 public function datos(Request $request)
 {
-    $query = \App\Models\Movimiento::query()->with('usuario');
+    $query = \App\Models\Movimiento::query()
+        ->with('usuario')
+        ->where('tienda_id', session('tienda_id', 1)); // ← FILTRO POR TIENDA
 
     // Filtros de búsqueda
     if ($request->filled('empleado')) $query->where('usuario_id', $request->empleado);
@@ -739,7 +803,6 @@ public function datos(Request $request)
     // Mandar todas las variables a la vista:
     return view('admin.datos', compact('movimientos', 'totalIngresos', 'totalEgresos', 'empleados'));
 }
-
 
 // Exportar todos los movimientos a Excel
 public function movimientosExcel(Request $request)
@@ -808,10 +871,11 @@ public function pagarCredito($id)
 public function ventas()
 {
     // Todos los movimientos para los TOTALES
-    $all = \App\Models\Movimiento::all();
+    $all = \App\Models\Movimiento::where('tienda_id', session('tienda_id', 1))->get();
 
     // Solo los de batch manual para la tabla
-    $movimientos = \App\Models\Movimiento::where('batch', 'manual')
+    $movimientos = \App\Models\Movimiento::where('tienda_id', session('tienda_id', 1))
+        ->where('batch', 'manual')
         ->orderByDesc('created_at')
         ->take(20)
         ->get();
@@ -841,7 +905,6 @@ public function ventas()
     ));
 }
 
-
 // MÉTODO PARA GUARDAR DESCUENTOS (puedes dejarlo igual, solo asegúrate de registrar en el campo correcto)
 public function descuento(Request $request)
 {
@@ -864,7 +927,9 @@ public function descuento(Request $request)
         'motivo'              => $motivo,
         'forma'               => $forma,
         // Aquí el concepto lo formateamos bonito:
-'concepto' => $request->input('concepto'),
+        'concepto'            => $request->input('concepto'),
+        // AGREGA EL CAMPO TIENDA
+        'tienda_id'           => session('tienda_id', 1), // <-- ¡Aquí!
     ];
 
     // Según forma, ponemos el monto negativo en el campo correspondiente
@@ -892,6 +957,18 @@ public function descuento(Request $request)
 
     return back()->with('ok', 'Descuento registrado correctamente.');
 }
+
+
+
+public function cambiarTienda(Request $request)
+{
+    session(['tienda_id' => $request->tienda_id]);
+    \Log::info('TIENDA ACTUAL EN VISTA:', [session('tienda_id')]);
+    // ¡SIEMPRE REDIRIGE A UN GET!
+    return redirect()->route('admin.dashboard');
+}
+
+
 
 
 

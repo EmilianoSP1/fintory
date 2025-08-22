@@ -18,6 +18,8 @@
   <form action="{{ route('admin.empleados.store') }}" method="POST" class="bg-white p-6 rounded shadow">
     @csrf
 
+    {{-- Campo oculto para asegurar que el empleado se crea en la tienda activa --}}
+    
     <div class="mb-4">
       <label class="block mb-1 font-medium">Nombre</label>
       <input type="text" name="name" value="{{ old('name') }}"

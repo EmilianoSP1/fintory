@@ -36,6 +36,7 @@ class Movimiento extends Model
         'pagado',
         'motivo',
         'forma',
+        'tienda_id',
     ];
 
     protected $attributes = [

@@ -96,6 +96,59 @@
             <p class="text-xs text-gray-500 dark:text-gray-300">Administrador Fintory</p>
           </div>
         </div>
+
+
+
+
+
+
+
+
+<div class="px-4 pt-4 pb-2 flex flex-col items-center">
+<form method="POST" action="{{ route('admin.cambiar.tienda') }}" class="flex gap-2 w-full">
+        @csrf
+        <button
+            type="submit"
+            name="tienda_id"
+            value="1"
+            class="flex-1 max-w-[110px] px-2 py-2 rounded-lg font-semibold text-xs shadow transition-all duration-200 border text-center
+                {{ session('tienda_id', 1) == 1
+                    ? 'bg-blue-600 text-white border-blue-600 cursor-default ring-2 ring-blue-400'
+                    : 'bg-white text-blue-800 border-blue-200 hover:bg-blue-50 hover:border-blue-400 hover:ring-1 hover:ring-blue-300' }}"
+            {{ session('tienda_id', 1) == 1 ? 'disabled' : '' }}
+        >
+            Plastiseo y Más
+        </button>
+        <span class="self-center text-gray-300 select-none">|</span>
+        <button
+            type="submit"
+            name="tienda_id"
+            value="2"
+            class="flex-1 max-w-[110px] px-2 py-2 rounded-lg font-semibold text-xs shadow transition-all duration-200 border text-center
+                {{ session('tienda_id', 1) == 2
+                    ? 'bg-green-600 text-white border-green-600 cursor-default ring-2 ring-green-400'
+                    : 'bg-white text-green-800 border-green-200 hover:bg-green-50 hover:border-green-400 hover:ring-1 hover:ring-green-300' }}"
+            {{ session('tienda_id', 1) == 2 ? 'disabled' : '' }}
+        >
+            Autofuchon
+        </button>
+    </form>
+    <div class="mt-2 text-xs text-gray-500 w-full text-center">
+        Tienda activa:
+        @if(session('tienda_id', 1) == 1)
+            <span class="font-bold text-blue-700">Plastiseo y Más</span>
+        @else
+            <span class="font-bold text-green-700">Autofuchon</span>
+        @endif
+    </div>
+</div>
+
+
+
+
+
+
+
 <nav class="flex flex-col py-2">
   <a href="{{ route('admin.dashboard') }}" class="px-6 py-3 flex items-center gap-3 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 font-medium transition">
     <svg class="w-5 h-5" fill="none" stroke="currentColor"><path d="M3 12l2-2 4 4 8-8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>

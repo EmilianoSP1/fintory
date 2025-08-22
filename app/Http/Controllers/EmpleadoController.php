@@ -18,27 +18,34 @@ public function dashboard()
     $hoy    = Carbon::today();
     $manana = Carbon::tomorrow();
 
-    // 1) traemos movimientos de hoy
-    $movimientosHoy = Movimiento::whereBetween('created_at', [$hoy, $manana])
+    // Movimientos de HOY por tienda del usuario
+    $movimientosHoy = Movimiento::where('tienda_id', Auth::user()->tienda_id)
+        ->whereBetween('created_at', [$hoy, $manana])
         ->orderBy('created_at')
         ->get();
 
-    // 2) calculamos totales
-    $totalIngresosHoy = $movimientosHoy
-        ->where('egreso', 0)
-        ->sum(fn($m) =>
-             $m->efectivo
-           + $m->tarjeta
-           + $m->caldes
-           + $m->pagos_clientes
-           + $m->venta_transferencia
-           + $m->otros
-        );
-    $totalEgresosHoy = $movimientosHoy
-        ->where('egreso', '>', 0)
-        ->sum('egreso');
+    // Separar ingresos y egresos
+    $ingresos = $movimientosHoy->filter(fn($m) => (float)$m->egreso === 0.0);
+    $egresos  = $movimientosHoy->filter(fn($m) => (float)$m->egreso > 0.0);
 
-    // 3) agrupamos en pares [ingreso, egreso]
+    // ==== Totales como Admin ====
+    // Ingresos (brutos ya guardados; en transferencia ya restaste 0.36 en guardarCierre)
+    $totalIngresos      = $ingresos->sum(fn($m) => $m->efectivo + $m->tarjeta + $m->caldes + $m->pagos_clientes + $m->venta_transferencia + $m->otros);
+    $totalEfectivo      = $ingresos->sum('efectivo');
+    $totalTarjeta       = $ingresos->sum('tarjeta');
+    $totalVales         = $ingresos->sum('caldes');
+    $totalPagos         = $ingresos->sum('pagos_clientes');
+    $totalTransferencia = $ingresos->sum('venta_transferencia');
+    $totalOtros         = $ingresos->sum('otros');
+
+    // Egresos por tipo
+    $totalEgresos             = $egresos->sum('egreso');
+    $totalEgresoEfectivo      = $egresos->where('egreso_tipo', 'Efectivo')->sum('egreso');
+    $totalEgresoTarjeta       = $egresos->where('egreso_tipo', 'Tarjeta')->sum('egreso');
+    $totalEgresoTransferencia = $egresos->where('egreso_tipo', 'Transferencia')->sum('egreso');
+    $totalEgresoCredito       = $egresos->where('egreso_tipo', 'Crédito')->sum('egreso');
+
+    // ==== Emparejar filas ingreso|egreso como ya hacías ====
     $filas = [];
     $i     = 0;
     $n     = $movimientosHoy->count();
@@ -46,9 +53,9 @@ public function dashboard()
         $curr = $movimientosHoy[$i];
         $fila = ['ingreso' => null, 'egreso' => null];
 
-        if ($curr->egreso == 0) {
+        if ((float)$curr->egreso === 0.0) {
             $fila['ingreso'] = $curr;
-            if ($i + 1 < $n && $movimientosHoy[$i+1]->egreso > 0) {
+            if ($i + 1 < $n && (float)$movimientosHoy[$i+1]->egreso > 0.0) {
                 $fila['egreso'] = $movimientosHoy[++$i];
             }
         } else {
@@ -60,11 +67,24 @@ public function dashboard()
     }
 
     return view('empleado.dashboard', compact(
-      'filas',
-      'totalIngresosHoy',
-      'totalEgresosHoy'
+        'filas',
+        // Totales de ingresos
+        'totalIngresos',
+        'totalEfectivo',
+        'totalTarjeta',
+        'totalVales',
+        'totalPagos',
+        'totalTransferencia',
+        'totalOtros',
+        // Totales de egresos
+        'totalEgresos',
+        'totalEgresoEfectivo',
+        'totalEgresoTarjeta',
+        'totalEgresoTransferencia',
+        'totalEgresoCredito'
     ));
 }
+
 
 public function guardarCierre(Request $request)
 {
@@ -138,6 +158,7 @@ if (
             'otros'               => $datos['otros_monto']         ?? 0,
             'otros_descripcion'   => $datos['otros_descripcion']   ?? null,
             'egreso'              => 0,
+            'tienda_id'            => Auth::user()->tienda_id,
         ]);
 
         // EGRESO
@@ -172,6 +193,7 @@ if (
             Movimiento::create([
                 'batch'                    => $batch,
                 'usuario_id'               => Auth::id(),
+                'tienda_id'                => Auth::user()->tienda_id, 
                 'concepto'                 => $conceptoE,
                 'efectivo'                 => 0,
                 'tarjeta'                  => 0,

@@ -34,12 +34,6 @@
       </button>
     </form>
 
-    <p class="mt-4 text-center">
-      ¿No tienes cuenta?
-      <a href="{{ route('register.form') }}" class="text-blue-600 hover:underline">
-        Regístrate aquí
-      </a>
-    </p>
   </div>
 </body>
 </html>

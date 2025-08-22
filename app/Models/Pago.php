@@ -10,7 +10,7 @@ class Pago extends Model
     use HasFactory;
 
     protected $fillable = [
-        'empleado_id', 'concepto', 'monto', 'fecha', 'descripcion', 'metodo'
+        'empleado_id', 'concepto', 'monto', 'fecha', 'descripcion', 'metodo', 'tienda_id'
     ];
 
     public function empleado()

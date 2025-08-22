@@ -125,6 +125,12 @@ Route::delete('movimiento/{id}/eliminar', [AdminController::class, 'destroyMovim
               ->name('usuarios.actualizar');
          Route::delete('usuarios/{usuario}',     [AdminController::class, 'eliminarUsuario'])
               ->name('usuarios.eliminar');
+
+
+
+              //Cambiar Tiendas
+Route::post('cambiar-tienda', [AdminController::class, 'cambiarTienda'])->name('cambiar.tienda');
+
      });
 
 
@@ -179,3 +185,5 @@ Route::middleware(['auth', VerificarRol::class . ':usuario'])
          Route::get('/', [UsuarioController::class, 'inicio'])
               ->name('usuario.inicio');
      });
+
+

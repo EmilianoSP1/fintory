@@ -106,6 +106,40 @@
     </div>
   </div>
 
+  {{-- =========== DESGLOSE DE INGRESOS POR MÉTODO ========== --}}
+  <div class="mx-auto max-w-6xl mt-4 md:mt-6 grid grid-cols-2 md:grid-cols-5 gap-4">
+    <div class="bg-gray-50 p-4 rounded shadow text-center">
+      <div class="text-sm font-medium text-gray-700">Efectivo</div>
+      <div class="mt-1 text-xl font-bold text-gray-900">
+        ${{ number_format($ingresosEfectivo, 2) }}
+      </div>
+    </div>
+    <div class="bg-gray-50 p-4 rounded shadow text-center">
+      <div class="text-sm font-medium text-gray-700">Tarjeta</div>
+      <div class="mt-1 text-xl font-bold text-gray-900">
+        ${{ number_format($ingresosTarjeta, 2) }}
+      </div>
+    </div>
+    <div class="bg-gray-50 p-4 rounded shadow text-center">
+      <div class="text-sm font-medium text-gray-700">Vales</div>
+      <div class="mt-1 text-xl font-bold text-gray-900">
+        ${{ number_format($ingresosVales, 2) }}
+      </div>
+    </div>
+    <div class="bg-gray-50 p-4 rounded shadow text-center">
+      <div class="text-sm font-medium text-gray-700">Pagos Clientes</div>
+      <div class="mt-1 text-xl font-bold text-gray-900">
+        ${{ number_format($ingresosPagosClientes, 2) }}
+      </div>
+    </div>
+    <div class="bg-gray-50 p-4 rounded shadow text-center">
+      <div class="text-sm font-medium text-gray-700">Transferencia</div>
+      <div class="mt-1 text-xl font-bold text-gray-900">
+        ${{ number_format($ingresosTransferencia, 2) }}
+      </div>
+    </div>
+  </div>
+
   {{-- ================================================
      TABLA DETALLADA DE MOVIMIENTOS DEL PERIODO
      ================================================ --}}
