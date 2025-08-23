@@ -285,7 +285,9 @@ x-data="{
       {{-- Total INGRESOS --}}
       <div class="bg-white border border-gray-200 rounded-lg px-8 py-4 shadow-sm text-center" style="min-width:210px;">
         <span class="block text-[11px] text-gray-700 font-semibold uppercase tracking-wider mb-1">Total Ingresos</span>
-        <span class="text-2xl font-extrabold text-indigo-700">${{ number_format($totalIngresos, 2) }}</span>
+<span class="text-2xl font-extrabold text-indigo-700">
+  ${{ number_format($totalIngresosNeto, 2) }}
+</span>
       </div>
       {{-- Conceptos INGRESOS (netos) --}}
       <div class="flex flex-row gap-2">

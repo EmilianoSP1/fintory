@@ -107,11 +107,21 @@ public function dashboard(Request $request)
     $totalEgresoTransferencia  = $egresos->where('egreso_tipo', 'Transferencia')->sum('egreso');
     $totalEgresoCredito        = $egresos->where('egreso_tipo', 'Crédito')->sum('egreso');
     $totalEgresoTarjeta       = $egresos->where('egreso_tipo', 'Tarjeta')->sum('egreso');
+    // === NUEVO: total de ingresos NETO ===
+// (equivalente a netear por método: efectivo, tarjeta y transferencia)
+$totalIngresosNeto =
+    ($totalEfectivo ?? 0)      - ($totalEgresoEfectivo ?? 0) +
+    ($totalTarjeta ?? 0)       - ($totalEgresoTarjeta ?? 0) +
+    ($totalTransferencia ?? 0) - ($totalEgresoTransferencia ?? 0) +
+    ($totalVales ?? 0) +
+    ($totalPagos ?? 0) +
+    ($totalOtros ?? 0);
 
     // Devuelve la vista con la variable $corte
 return view('admin.dashboard', compact(
     'filas',
-    'totalIngresos',
+    'totalIngresos',            
+    'totalIngresosNeto',        
     'totalOtros',
     'totalEfectivo',
     'totalTarjeta',
